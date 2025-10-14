@@ -16,7 +16,8 @@ import 'package:chitieu/auth/auth_provider.dart';
 import 'package:chitieu/auth/auth_service.dart';
 
 // ================= CONFIG =================
-const String _API_BASE_URL = "http://172.20.10.3:8000";
+// ignore: constant_identifier_names
+const String _API_BASE_URL = "http://192.168.1.67:8000";
 
 class AnalyticsPage extends StatefulWidget {
   const AnalyticsPage({super.key});

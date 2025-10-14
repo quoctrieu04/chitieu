@@ -102,7 +102,7 @@ class AppLocalizationsVi extends AppLocalizations {
   String get loginSubmit => 'Đăng nhập';
 
   @override
-  String get totalAssets => 'Tổng tài sản';
+  String get totalAssets => 'Tổng tiền';
 
   @override
   String get payment => 'Thanh toán';

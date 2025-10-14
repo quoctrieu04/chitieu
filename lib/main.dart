@@ -48,7 +48,7 @@ Future<void> main() async {
   // IP/LAN backend của bạn
   const base = String.fromEnvironment(
     'API_BASE',
-    defaultValue: 'http://172.20.10.3:8000', // đổi IP 192.168.1.67:8000
+    defaultValue: 'http://192.168.1.67:8000', // đổi IP 192.168.1.67:8000
   );
   final apiBase = '$base/api';
 

@@ -37,6 +37,15 @@ class _AccountsPageState extends State<AccountsPage> {
   bool _fetchedOnce = false;
   bool _hideBalance = false;
 
+  // ===== Helpers tính ngày còn lại trong tháng =====
+  DateTime _endOfMonth(DateTime d) => DateTime(d.year, d.month + 1, 0);
+  int _daysLeftInMonth(DateTime now) {
+    final today = DateTime(now.year, now.month, now.day);
+    final end = _endOfMonth(now);
+    // tính cả ngày hôm nay
+    return end.difference(today).inDays + 1;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -120,9 +129,38 @@ class _AccountsPageState extends State<AccountsPage> {
     final num totalSpent =
         budgetsProv.items.fold<num>(0, (s, b) => s + b.spent);
 
-    // GỘP "chưa phân bổ" vào "còn lại":
     // Còn lại tổng = Tổng tài sản - Đã chi
     final num combinedRemaining = totalBalance - totalSpent;
+
+    // ====== Cảnh báo vượt dự thu ======
+    final bool overSpent =
+        !(walletProv.loading || budgetsProv.loading) && combinedRemaining < 0;
+    final num deficit = (combinedRemaining < 0) ? -combinedRemaining : 0;
+
+    // ====== PHẦN MỚI: chỉ dựa vào ngày còn lại + số dư ======
+    final now = DateTime.now();
+    final int daysLeft = _daysLeftInMonth(now);
+
+    // Mức chi trung bình/ngày được phép từ hôm nay đến hết tháng
+    final num dailyAllowance =
+        daysLeft > 0 ? (combinedRemaining / daysLeft) : 0;
+
+    // Ngưỡng "thấp" để đưa ra lời khuyên mạnh (tuỳ bạn chỉnh)
+    const num kLowAllowanceThreshold = 20000;
+
+    String buildAdvice() {
+      if (combinedRemaining <= 0) {
+        return 'Bạn đã ${combinedRemaining < 0 ? "vượt" : "hết"} số tiền còn lại của tháng này. '
+               'Hãy tiết kiệm hoặc cân nhắc thêm nguồn thu.';
+      }
+      if (dailyAllowance <= 0) {
+        return 'Số dư hiện tại không đủ để chi tiêu cho $daysLeft ngày còn lại. Hãy thêm nguồn thu hoặc cắt giảm chi.';
+      }
+      if (dailyAllowance < kLowAllowanceThreshold) {
+        return 'Mức chi trung bình/ngày đang rất thấp. Hãy tiết kiệm hơn hoặc cân nhắc thêm nguồn thu.';
+      }
+      return 'Để đủ cho $daysLeft ngày còn lại, hãy giữ mức chi khoảng ${fmt(dailyAllowance)} mỗi ngày.';
+    }
 
     return RefreshIndicator(
       onRefresh: () async {
@@ -146,10 +184,86 @@ class _AccountsPageState extends State<AccountsPage> {
                 title: t.totalAssets,
                 totalText: _hideBalance ? '•••' : fmt(totalBalance),
                 loading: walletProv.loading || budgetsProv.loading,
-                paymentText: _hideBalance ? '•••' : fmt(totalSpent),          // Đã chi
-                trackingText: _hideBalance ? '•••' : fmt(combinedRemaining),  // Còn lại (đã gộp)
+                paymentText:
+                    _hideBalance ? '•••' : fmt(totalSpent), // Đã chi
+                trackingText: _hideBalance
+                    ? '•••'
+                    : fmt(combinedRemaining), // Còn lại (đã gộp)
                 onToggleEye: _toggleHide,
                 isHidden: _hideBalance,
+              ),
+
+              // ===== Banner cảnh báo nếu chi vượt dự thu =====
+              if (overSpent) ...[
+                const SizedBox(height: 8),
+                WarningBanner(
+                  message: _hideBalance
+                      ? 'Chi dự kiến của tháng đang vượt quá số tiền dự thu hiện tại.'
+                      : 'Chi dự kiến của tháng đang vượt quá dự thu hiện tại ${fmt(deficit)}.',
+                  onFixBudgets: () {
+                    Navigator.pushNamed(context, '/budgets');
+                  },
+                  onAddIncome: () async {
+                    final created = await showModalBottomSheet<bool>(
+                      context: context,
+                      isScrollControlled: true,
+                      useSafeArea: true,
+                      shape: const RoundedRectangleBorder(
+                        borderRadius:
+                            BorderRadius.vertical(top: Radius.circular(20)),
+                      ),
+                      builder: (context) => Padding(
+                        padding: EdgeInsets.only(
+                          bottom: MediaQuery.of(context).viewInsets.bottom,
+                        ),
+                        child: const CreateWalletForm(),
+                      ),
+                    );
+                    if (created == true && context.mounted) {
+                      await context.read<WalletProvider>().fetch();
+                      safeShowSnackBar(
+                        context,
+                        const SnackBar(content: Text('Đã thêm nguồn thu')),
+                      );
+                    }
+                  },
+                ),
+              ],
+
+              // ===== Banner gợi ý theo số ngày còn lại (CHỈ NGÀY & SỐ DƯ) =====
+              const SizedBox(height: 8),
+              SmartAdviceBanner(
+                title: 'Gợi ý chi tiêu tháng này',
+                lines: [
+                  'Còn lại: ${_hideBalance ? "•••" : fmt(combinedRemaining)}',
+                  'Ngày còn lại trong tháng: $daysLeft',
+                  if (combinedRemaining > 0)
+                    'Mức chi trung bình/ngày cho phép: ${_hideBalance ? "•••" : fmt(dailyAllowance)}',
+                ],
+                advice: buildAdvice(),
+                onAddIncome: () async {
+                  final created = await showModalBottomSheet<bool>(
+                    context: context,
+                    isScrollControlled: true,
+                    useSafeArea: true,
+                    shape: const RoundedRectangleBorder(
+                      borderRadius:
+                          BorderRadius.vertical(top: Radius.circular(20)),
+                    ),
+                    builder: (context) => Padding(
+                      padding: EdgeInsets.only(
+                          bottom: MediaQuery.of(context).viewInsets.bottom),
+                      child: const CreateWalletForm(),
+                    ),
+                  );
+                  if (created == true && context.mounted) {
+                    await context.read<WalletProvider>().fetch();
+                    safeShowSnackBar(
+                      context,
+                      const SnackBar(content: Text('Đã thêm nguồn thu')),
+                    );
+                  }
+                },
               ),
 
               const SizedBox(height: 16),
@@ -493,6 +607,137 @@ class _Col extends StatelessWidget {
           const SizedBox(height: 2),
           Text(value,
               style: TextStyle(color: color, fontWeight: FontWeight.w800)),
+        ],
+      ),
+    );
+  }
+}
+
+/// Banner cảnh báo vượt dự thu
+class WarningBanner extends StatelessWidget {
+  final String message;
+  final VoidCallback onFixBudgets;
+  final VoidCallback onAddIncome;
+
+  const WarningBanner({
+    super.key,
+    required this.message,
+    required this.onFixBudgets,
+    required this.onAddIncome,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFE9E9), // đỏ nhạt
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFF19999)),
+        boxShadow: const [
+          BoxShadow(blurRadius: 6, offset: Offset(0, 2), color: Colors.black12),
+        ],
+      ),
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.warning_amber_rounded, color: Color(0xFFD64545)),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  message,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF8B1E1E),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              TextButton(
+                onPressed: onFixBudgets,
+                child: const Text('Điều chỉnh ngân sách'),
+              ),
+              const SizedBox(width: 8),
+              OutlinedButton(
+                onPressed: onAddIncome,
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: cs.primary,
+                  side: BorderSide(color: cs.primary),
+                ),
+                child: const Text('Thêm nguồn thu'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Banner gợi ý dựa trên số ngày còn lại trong tháng (KHÔNG dùng trend)
+class SmartAdviceBanner extends StatelessWidget {
+  final String title;
+  final List<String> lines;
+  final String advice;
+  final VoidCallback onAddIncome;
+
+  const SmartAdviceBanner({
+    super.key,
+    required this.title,
+    required this.lines,
+    required this.advice,
+    required this.onAddIncome,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: cs.surface,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: const [
+          BoxShadow(blurRadius: 6, offset: Offset(0, 2), color: Colors.black12)
+        ],
+        border: Border.all(color: cs.primary.withOpacity(.25)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            Icon(Icons.lightbulb_rounded, color: cs.primary),
+            const SizedBox(width: 8),
+            Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+          ]),
+          const SizedBox(height: 8),
+          ...lines.map((l) => Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Text(l, style: const TextStyle(fontWeight: FontWeight.w600)),
+              )),
+          const SizedBox(height: 8),
+          Text(advice),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              TextButton(
+                onPressed: () => Navigator.pushNamed(context, '/budgets'),
+                child: const Text('Điều chỉnh ngân sách'),
+              ),
+              const SizedBox(width: 8),
+              OutlinedButton(
+                onPressed: onAddIncome,
+                child: const Text('Thêm nguồn thu'),
+              ),
+            ],
+          ),
         ],
       ),
     );
