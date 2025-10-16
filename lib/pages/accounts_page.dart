@@ -727,10 +727,7 @@ class SmartAdviceBanner extends StatelessWidget {
           const SizedBox(height: 8),
           Row(
             children: [
-              TextButton(
-                onPressed: () => Navigator.pushNamed(context, '/budgets'),
-                child: const Text('Điều chỉnh ngân sách'),
-              ),
+              
               const SizedBox(width: 8),
               OutlinedButton(
                 onPressed: onAddIncome,

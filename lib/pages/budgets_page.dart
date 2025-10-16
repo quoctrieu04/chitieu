@@ -32,6 +32,9 @@ import 'allocate_money_page.dart';
 // TRANG CHI TIẾT DANH MỤC
 import 'package:chitieu/core/budget/category/category_detail_page.dart';
 
+// === NEW: widget danh mục có thanh tiến trình + cảnh báo
+import 'package:chitieu/core/budget/widgets/budget_category_tile.dart';
+
 class BudgetsPage extends StatefulWidget {
   const BudgetsPage({super.key});
 
@@ -622,7 +625,6 @@ class _BudgetsPageState extends State<BudgetsPage> {
   }
 
   /// Liên kết Category với BudgetItem theo categoryId
-    /// Liên kết Category với BudgetItem theo categoryId
   Widget _categoryTile(BuildContext context, Category c) {
     final budgets = context.watch<BudgetsProvider>();
 
@@ -640,86 +642,32 @@ class _BudgetsPageState extends State<BudgetsPage> {
       ),
     );
 
-    final remaining = item.amount - item.spent;
-
-    return Card(
-      elevation: 0.5,
-      margin: const EdgeInsets.symmetric(vertical: 6),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        title: Text(
-          c.name,
-          style: const TextStyle(fontWeight: FontWeight.w700),
-        ),
-        subtitle: Padding(
-          padding: const EdgeInsets.only(top: 4),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  const Text('Đã phân bổ: '),
-                  MoneyText(item.amount),
-                ],
-              ),
-              const SizedBox(height: 2),
-              Row(
-                children: [
-                  const Text('Đã tiêu: '),
-                  MoneyText(
-                    item.spent,
-                    style: const TextStyle(
-                      color: Colors.redAccent,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 2),
-              Row(
-                children: [
-                  const Text('Còn lại: '),
-                  MoneyText(
-                    remaining,
-                    style: TextStyle(
-                      color: remaining < 0
-                          ? Colors.redAccent
-                          : Colors.green.shade700,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ],
-              ),
-            ],
+    return BudgetCategoryTile(
+      category: c,
+      item: item,
+      onTap: () async {
+        final updated = await Navigator.of(context).push<bool>(
+          MaterialPageRoute(
+            builder: (_) => CategoryDetailPage(
+              category: c,
+              year: _ym.year,
+              month: _ym.month,
+              initialLimit: item.amount.toDouble(),
+            ),
           ),
-        ),
-        trailing: const Icon(Icons.keyboard_arrow_down_rounded),
-        onTap: () async {
-          final updated = await Navigator.of(context).push<bool>(
-            MaterialPageRoute(
-              builder: (_) => CategoryDetailPage(
-                category: c,
+        );
+
+        if (updated == true && context.mounted) {
+          await context.read<CategoryProvider>().refresh();
+          await context.read<BudgetsProvider>().loadForMonth(
                 year: _ym.year,
                 month: _ym.month,
-                initialLimit: item.amount.toDouble(),
-              ),
-            ),
-          );
-
-          if (updated == true && context.mounted) {
-            await context.read<CategoryProvider>().refresh();
-            await context.read<BudgetsProvider>().loadForMonth(
-                  year: _ym.year,
-                  month: _ym.month,
-                );
-            setState(() {});
-          }
-        },
-      ),
+              );
+          setState(() {});
+        }
+      },
     );
   }
-
 
   String _formatMonthYear(BuildContext ctx, DateTime ym) {
     final locale = Localizations.localeOf(ctx).toLanguageTag();
