@@ -1,40 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
-import 'package:intl/intl.dart';
 
 import 'package:chitieu/l10n/app_localizations.dart';
 import 'package:chitieu/api/wallet/wallet_provider.dart';
-
-/// Formatter để hiển thị số có dấu phẩy khi nhập
-class CurrencyInputFormatter extends TextInputFormatter {
-  final NumberFormat _formatter = NumberFormat.decimalPattern();
-
-  @override
-  TextEditingValue formatEditUpdate(
-    TextEditingValue oldValue,
-    TextEditingValue newValue,
-  ) {
-    if (newValue.text.isEmpty) {
-      return newValue.copyWith(text: '');
-    }
-
-    // Bỏ tất cả ký tự không phải số
-    String raw = newValue.text.replaceAll(RegExp(r'[^0-9]'), '');
-    if (raw.isEmpty) {
-      return newValue.copyWith(text: '');
-    }
-
-    // Parse và format lại
-    final value = int.parse(raw);
-    final newText = _formatter.format(value);
-
-    return TextEditingValue(
-      text: newText,
-      selection: TextSelection.collapsed(offset: newText.length),
-    );
-  }
-}
 
 class CreateWalletForm extends StatefulWidget {
   const CreateWalletForm({super.key});
@@ -46,13 +14,11 @@ class CreateWalletForm extends StatefulWidget {
 class _CreateWalletFormState extends State<CreateWalletForm> {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
-  final _amountController = TextEditingController();
   bool _saving = false;
 
   @override
   void dispose() {
     _nameController.dispose();
-    _amountController.dispose();
     super.dispose();
   }
 
@@ -62,14 +28,11 @@ class _CreateWalletFormState extends State<CreateWalletForm> {
     final t = AppLocalizations.of(context)!;
     final messenger = ScaffoldMessenger.of(context);
 
-    // parse lại về double (bỏ dấu phẩy)
-    final raw = _amountController.text.trim().replaceAll(',', '');
-    final amount = double.tryParse(raw) ?? 0;
-
     setState(() => _saving = true);
+    // Luôn tạo với số dư 0
     final ok = await context
         .read<WalletProvider>()
-        .createWallet(_nameController.text.trim(), amount);
+        .createWallet(_nameController.text.trim(), 0);
     setState(() => _saving = false);
 
     if (!mounted) return;
@@ -89,9 +52,10 @@ class _CreateWalletFormState extends State<CreateWalletForm> {
           actions: [
             TextButton(
               onPressed: () => messenger.hideCurrentMaterialBanner(),
-              child: Text('OK',
-                  style: TextStyle(
-                      color: Theme.of(context).colorScheme.onPrimary)),
+              child: Text(
+                'OK',
+                style: TextStyle(color: Theme.of(context).colorScheme.onPrimary),
+              ),
             ),
           ],
         ),
@@ -140,38 +104,17 @@ class _CreateWalletFormState extends State<CreateWalletForm> {
                   ),
                   const SizedBox(height: 16),
 
-                  // Tên ví
+                  // Tên khoản thu
                   TextFormField(
                     controller: _nameController,
-                    textInputAction: TextInputAction.next,
+                    textInputAction: TextInputAction.done,
+                    onFieldSubmitted: (_) => _submit(),
                     decoration: InputDecoration(
                       labelText: t.walletName,
                       border: const OutlineInputBorder(),
                     ),
                     validator: (v) =>
                         (v == null || v.trim().isEmpty) ? t.requiredField : null,
-                  ),
-                  const SizedBox(height: 12),
-
-                  // Số tiền ban đầu (có formatter)
-                  TextFormField(
-                    controller: _amountController,
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    textInputAction: TextInputAction.done,
-                    inputFormatters: [CurrencyInputFormatter()],
-                    onFieldSubmitted: (_) => _submit(),
-                    decoration: InputDecoration(
-                      labelText: t.initialAmount,
-                      hintText: '0',
-                      border: const OutlineInputBorder(),
-                    ),
-                    validator: (v) {
-                      if (v == null || v.trim().isEmpty) return t.requiredField;
-                      final parsed = num.tryParse(v.replaceAll(',', '').trim());
-                      if (parsed == null) return t.invalidNumber;
-                      if (parsed < 0) return t.invalidNumber;
-                      return null;
-                    },
                   ),
                   const SizedBox(height: 20),
 

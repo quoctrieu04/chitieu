@@ -24,6 +24,12 @@ import 'package:intl/intl.dart';
 // Budgets
 import 'package:chitieu/core/budget/budgets_provider.dart';
 
+// Categories (danh mục chi)
+import 'package:chitieu/api/category/category_provider.dart';
+import 'package:chitieu/api/category/category_model.dart';
+// (nếu muốn) sang trang chi tiết danh mục
+// import 'package:chitieu/core/budget/category/category_detail_page.dart';
+
 class AccountsPage extends StatefulWidget {
   const AccountsPage({super.key});
   @override
@@ -37,13 +43,16 @@ class _AccountsPageState extends State<AccountsPage> {
   bool _fetchedOnce = false;
   bool _hideBalance = false;
 
+  // Expand/collapse danh mục
+  bool _expandIncomeCats = true;
+  bool _expandExpenseCats = true;
+
   // ===== Helpers tính ngày còn lại trong tháng =====
   DateTime _endOfMonth(DateTime d) => DateTime(d.year, d.month + 1, 0);
   int _daysLeftInMonth(DateTime now) {
     final today = DateTime(now.year, now.month, now.day);
     final end = _endOfMonth(now);
-    // tính cả ngày hôm nay
-    return end.difference(today).inDays + 1;
+    return end.difference(today).inDays + 1; // tính cả hôm nay
   }
 
   @override
@@ -62,6 +71,7 @@ class _AccountsPageState extends State<AccountsPage> {
               year: DateTime.now().year,
               month: DateTime.now().month,
             );
+        await context.read<CategoryProvider>().refresh(); // nạp danh mục chi
       }
       _auth!.addListener(_onAuthChanged);
     });
@@ -92,12 +102,14 @@ class _AccountsPageState extends State<AccountsPage> {
               year: DateTime.now().year,
               month: DateTime.now().month,
             );
+        context.read<CategoryProvider>().refresh();
       }
     } else {
       _fetchedOnce = false;
       wallets.reset();
       // context.read<BudgetsProvider>().reset();
       // context.read<TxProvider>().clear();
+      // context.read<CategoryProvider>().reset();
     }
   }
 
@@ -124,12 +136,12 @@ class _AccountsPageState extends State<AccountsPage> {
 
     final txProv = context.watch<TxProvider>();
     final budgetsProv = context.watch<BudgetsProvider>();
+    final catProv = context.watch<CategoryProvider>();
 
     // ====== Tính số liệu tháng hiện tại ======
     final num totalSpent =
         budgetsProv.items.fold<num>(0, (s, b) => s + b.spent);
 
-    // Còn lại tổng = Tổng tài sản - Đã chi
     final num combinedRemaining = totalBalance - totalSpent;
 
     // ====== Cảnh báo vượt dự thu ======
@@ -137,21 +149,15 @@ class _AccountsPageState extends State<AccountsPage> {
         !(walletProv.loading || budgetsProv.loading) && combinedRemaining < 0;
     final num deficit = (combinedRemaining < 0) ? -combinedRemaining : 0;
 
-    // ====== PHẦN MỚI: chỉ dựa vào ngày còn lại + số dư ======
+    // ====== Gợi ý theo ngày còn lại + số dư ======
     final now = DateTime.now();
     final int daysLeft = _daysLeftInMonth(now);
-
-    // Mức chi trung bình/ngày được phép từ hôm nay đến hết tháng
-    final num dailyAllowance =
-        daysLeft > 0 ? (combinedRemaining / daysLeft) : 0;
-
-    // Ngưỡng "thấp" để đưa ra lời khuyên mạnh (tuỳ bạn chỉnh)
+    final num dailyAllowance = daysLeft > 0 ? (combinedRemaining / daysLeft) : 0;
     const num kLowAllowanceThreshold = 20000;
 
     String buildAdvice() {
       if (combinedRemaining <= 0) {
-        return 'Bạn đã ${combinedRemaining < 0 ? "vượt" : "hết"} số tiền còn lại của tháng này. '
-               'Hãy tiết kiệm hoặc cân nhắc thêm nguồn thu.';
+        return 'Bạn đã ${combinedRemaining < 0 ? "vượt" : "hết"} số tiền còn lại của tháng này. Hãy tiết kiệm hoặc cân nhắc thêm nguồn thu.';
       }
       if (dailyAllowance <= 0) {
         return 'Số dư hiện tại không đủ để chi tiêu cho $daysLeft ngày còn lại. Hãy thêm nguồn thu hoặc cắt giảm chi.';
@@ -170,6 +176,7 @@ class _AccountsPageState extends State<AccountsPage> {
               year: DateTime.now().year,
               month: DateTime.now().month,
             );
+        await context.read<CategoryProvider>().refresh();
       },
       child: SafeArea(
         bottom: true,
@@ -184,16 +191,14 @@ class _AccountsPageState extends State<AccountsPage> {
                 title: t.totalAssets,
                 totalText: _hideBalance ? '•••' : fmt(totalBalance),
                 loading: walletProv.loading || budgetsProv.loading,
-                paymentText:
-                    _hideBalance ? '•••' : fmt(totalSpent), // Đã chi
-                trackingText: _hideBalance
-                    ? '•••'
-                    : fmt(combinedRemaining), // Còn lại (đã gộp)
+                paymentText: _hideBalance ? '•••' : fmt(totalSpent),
+                trackingText:
+                    _hideBalance ? '•••' : fmt(combinedRemaining),
                 onToggleEye: _toggleHide,
                 isHidden: _hideBalance,
               ),
 
-              // ===== Banner cảnh báo nếu chi vượt dự thu =====
+              // ===== Banner cảnh báo =====
               if (overSpent) ...[
                 const SizedBox(height: 8),
                 WarningBanner(
@@ -230,7 +235,7 @@ class _AccountsPageState extends State<AccountsPage> {
                 ),
               ],
 
-              // ===== Banner gợi ý theo số ngày còn lại (CHỈ NGÀY & SỐ DƯ) =====
+              // ===== Banner gợi ý =====
               const SizedBox(height: 8),
               SmartAdviceBanner(
                 title: 'Gợi ý chi tiêu tháng này',
@@ -379,6 +384,133 @@ class _AccountsPageState extends State<AccountsPage> {
                     },
                   );
                 }).toList(),
+              ),
+
+              // ===== Danh mục (thu & chi) — có thu gọn/mở rộng =====
+              const SizedBox(height: 24),
+              const Text('Danh mục',
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
+              const SizedBox(height: 8),
+
+              // --- Danh mục thu (từ ví/khoản thu)
+              _ExpandableHeader(
+                title: 'Danh mục thu',
+                expanded: _expandIncomeCats,
+                onToggle: () =>
+                    setState(() => _expandIncomeCats = !_expandIncomeCats),
+              ),
+              AnimatedSize(
+                duration: const Duration(milliseconds: 200),
+                curve: Curves.easeInOut,
+                child: (_expandIncomeCats)
+                    ? Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: (walletProv.loading && walletProv.items.isEmpty)
+                            ? const Padding(
+                                padding: EdgeInsets.symmetric(vertical: 8),
+                                child: LinearProgressIndicator(minHeight: 2),
+                              )
+                            : (walletProv.items.isEmpty)
+                                ? Padding(
+                                    padding:
+                                        const EdgeInsets.symmetric(vertical: 8),
+                                    child: Text(t.noData,
+                                        style: TextStyle(
+                                            color: cs.onSurfaceVariant)),
+                                  )
+                                : Column(
+                                    children: walletProv.items.map((w) {
+                                      return _CategoryCard(
+                                        name: w.name,
+                                        icon: Icons.account_balance_wallet_rounded,
+                                        color: const Color(0xFF1F9D4C), // xanh thu
+                                        onEdit: () {
+                                          showModalBottomSheet<bool>(
+                                            context: context,
+                                            isScrollControlled: true,
+                                            useSafeArea: true,
+                                            shape:
+                                                const RoundedRectangleBorder(
+                                              borderRadius:
+                                                  BorderRadius.vertical(
+                                                      top: Radius.circular(20)),
+                                            ),
+                                            builder: (context) => Padding(
+                                              padding: EdgeInsets.only(
+                                                  bottom: MediaQuery.of(context)
+                                                      .viewInsets
+                                                      .bottom),
+                                              child: EditWalletForm(
+                                                walletId: w.id,
+                                                initialName: w.name,
+                                                initialBalance: w.balance,
+                                              ),
+                                            ),
+                                          ).then((updated) async {
+                                            if (updated == true && mounted) {
+                                              await context
+                                                  .read<WalletProvider>()
+                                                  .fetch();
+                                            }
+                                          });
+                                        },
+                                      );
+                                    }).toList(),
+                                  ),
+                      )
+                    : const SizedBox.shrink(),
+              ),
+
+              const SizedBox(height: 12),
+
+              // --- Danh mục chi (từ CategoryProvider)
+              _ExpandableHeader(
+                title: 'Danh mục chi',
+                expanded: _expandExpenseCats,
+                onToggle: () =>
+                    setState(() => _expandExpenseCats = !_expandExpenseCats),
+              ),
+              AnimatedSize(
+                duration: const Duration(milliseconds: 200),
+                curve: Curves.easeInOut,
+                child: (_expandExpenseCats)
+                    ? Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: (catProv.loading && catProv.items.isEmpty)
+                            ? const Padding(
+                                padding: EdgeInsets.symmetric(vertical: 8),
+                                child: LinearProgressIndicator(minHeight: 2),
+                              )
+                            : (catProv.items.isEmpty)
+                                ? Padding(
+                                    padding:
+                                        const EdgeInsets.symmetric(vertical: 8),
+                                    child: Text(t.noData,
+                                        style: TextStyle(
+                                            color: cs.onSurfaceVariant)),
+                                  )
+                                : Column(
+                                    children: catProv.items.map((Category c) {
+                                      return _CategoryCard(
+                                        name: c.name,
+                                        icon: Icons.label_rounded,
+                                        color: const Color(0xFFD64545), // đỏ chi
+                                        onEdit: () async {
+                                          // Nếu muốn, điều hướng sang trang chi tiết danh mục:
+                                          // await Navigator.push(context, MaterialPageRoute(
+                                          //   builder: (_) => CategoryDetailPage(
+                                          //     category: c,
+                                          //     year: DateTime.now().year,
+                                          //     month: DateTime.now().month,
+                                          //     initialLimit: 0,
+                                          //   ),
+                                          // ));
+                                        },
+                                      );
+                                    }).toList(),
+                                  ),
+                      )
+                    : const SizedBox.shrink(),
               ),
 
               const SizedBox(height: 18),
@@ -562,7 +694,7 @@ class HeaderCard extends StatelessWidget {
 
           const SizedBox(height: 12),
 
-          // Payment | Tracking row (Còn lại đã gộp)
+          // Payment | Tracking row
           SizedBox(
             height: 44,
             child: Row(
@@ -613,7 +745,6 @@ class _Col extends StatelessWidget {
   }
 }
 
-/// Banner cảnh báo vượt dự thu
 class WarningBanner extends StatelessWidget {
   final String message;
   final VoidCallback onFixBudgets;
@@ -631,7 +762,7 @@ class WarningBanner extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
     return Container(
       decoration: BoxDecoration(
-        color: const Color(0xFFFFE9E9), // đỏ nhạt
+        color: const Color(0xFFFFE9E9),
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: const Color(0xFFF19999)),
         boxShadow: const [
@@ -681,7 +812,6 @@ class WarningBanner extends StatelessWidget {
   }
 }
 
-/// Banner gợi ý dựa trên số ngày còn lại trong tháng (KHÔNG dùng trend)
 class SmartAdviceBanner extends StatelessWidget {
   final String title;
   final List<String> lines;
@@ -715,19 +845,21 @@ class SmartAdviceBanner extends StatelessWidget {
           Row(children: [
             Icon(Icons.lightbulb_rounded, color: cs.primary),
             const SizedBox(width: 8),
-            Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+            Text(title,
+                style:
+                    const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
           ]),
           const SizedBox(height: 8),
           ...lines.map((l) => Padding(
                 padding: const EdgeInsets.only(bottom: 4),
-                child: Text(l, style: const TextStyle(fontWeight: FontWeight.w600)),
+                child: Text(l,
+                    style: const TextStyle(fontWeight: FontWeight.w600)),
               )),
           const SizedBox(height: 8),
           Text(advice),
           const SizedBox(height: 8),
           Row(
             children: [
-              
               const SizedBox(width: 8),
               OutlinedButton(
                 onPressed: onAddIncome,
@@ -902,6 +1034,109 @@ class _WalletCard extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Thẻ hiển thị danh mục (thu/chi) — không có số dư
+class _CategoryCard extends StatelessWidget {
+  final String name;
+  final IconData icon;
+  final Color color;
+  final VoidCallback onEdit;
+
+  const _CategoryCard({
+    required this.name,
+    required this.icon,
+    required this.color,
+    required this.onEdit,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.06),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: const [
+          BoxShadow(blurRadius: 6, offset: Offset(0, 2), color: Colors.black12)
+        ],
+        border: Border.all(color: color.withOpacity(.25)),
+      ),
+      child: Stack(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+            child: Row(
+              children: [
+                Container(
+                  decoration: BoxDecoration(
+                    color: color.withOpacity(0.18),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  width: 48,
+                  height: 48,
+                  child: Icon(icon, color: color),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontSize: 16, fontWeight: FontWeight.w700),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Positioned(
+            right: 4,
+            top: 4,
+            child: IconButton(
+              onPressed: onEdit,
+              icon: const Icon(Icons.edit_outlined),
+              tooltip: 'Chỉnh sửa danh mục',
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Header có thể bấm để mở/đóng danh sách con
+class _ExpandableHeader extends StatelessWidget {
+  final String title;
+  final bool expanded;
+  final VoidCallback onToggle;
+
+  const _ExpandableHeader({
+    required this.title,
+    required this.expanded,
+    required this.onToggle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return InkWell(
+      onTap: onToggle,
+      borderRadius: BorderRadius.circular(10),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Row(
+          children: [
+            Icon(expanded ? Icons.expand_less : Icons.expand_more, color: cs.primary),
+            const SizedBox(width: 6),
+            Text(title,
+                style:
+                    const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+          ],
+        ),
       ),
     );
   }

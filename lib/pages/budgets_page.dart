@@ -35,6 +35,19 @@ import 'package:chitieu/core/budget/category/category_detail_page.dart';
 // === NEW: widget danh mục có thanh tiến trình + cảnh báo
 import 'package:chitieu/core/budget/widgets/budget_category_tile.dart';
 
+/// tiện ích: làm sáng/tối màu để tạo gradient từ primary
+Color _lighter(Color c, [double amount = .14]) {
+  final hsl = HSLColor.fromColor(c);
+  final l = (hsl.lightness + amount).clamp(0.0, 1.0);
+  return hsl.withLightness(l).toColor();
+}
+
+Color _darker(Color c, [double amount = .18]) {
+  final hsl = HSLColor.fromColor(c);
+  final l = (hsl.lightness - amount).clamp(0.0, 1.0);
+  return hsl.withLightness(l).toColor();
+}
+
 class BudgetsPage extends StatefulWidget {
   const BudgetsPage({super.key});
 
@@ -57,7 +70,6 @@ class _BudgetsPageState extends State<BudgetsPage> {
   void _onAuthChanged() {
     final authed = context.read<AuthProvider>().isAuthenticated;
     if (authed && !_wasAuthed) {
-      // vừa chuyển từ chưa login -> đã login
       _reloadAll();
     }
     _wasAuthed = authed;
@@ -66,7 +78,6 @@ class _BudgetsPageState extends State<BudgetsPage> {
   @override
   void initState() {
     super.initState();
-    // đăng ký listener sau frame đầu để có context hợp lệ
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final auth = context.read<AuthProvider>();
@@ -77,7 +88,6 @@ class _BudgetsPageState extends State<BudgetsPage> {
 
   @override
   void dispose() {
-    // gỡ listener để tránh memory leak
     try {
       context.read<AuthProvider>().removeListener(_onAuthChanged);
     } catch (_) {}
@@ -110,14 +120,12 @@ class _BudgetsPageState extends State<BudgetsPage> {
 
     if (go != true || !context.mounted) return false;
 
-    // Mở trang Login và CHỜ kết quả
     final ok = await Navigator.of(context).push<bool>(
       MaterialPageRoute(builder: (_) => const LoginPage()),
     );
 
     final authedNow = ok == true && context.read<AuthProvider>().isAuthenticated;
 
-    // === MỚI: reload toàn bộ ngay sau khi login thành công ===
     if (authedNow && context.mounted) {
       await _reloadAll();
     }
@@ -165,7 +173,7 @@ class _BudgetsPageState extends State<BudgetsPage> {
     futures.add(budgets.loadForMonth(year: _ym.year, month: _ym.month));
 
     await Future.wait(futures);
-    if (mounted) setState(() {}); // đảm bảo rebuild ngay
+    if (mounted) setState(() {});
   }
 
   /// MỞ TRANG PHÂN BỔ TIỀN
@@ -173,27 +181,23 @@ class _BudgetsPageState extends State<BudgetsPage> {
     final ok = await _ensureAuthed(context);
     if (!ok || !mounted) return;
 
-    // tải danh mục
     final catProv = context.read<CategoryProvider>();
     await catProv.refresh();
     final categories = catProv.items;
 
-    // lấy phân bổ hiện có để prefill
     final budProv = context.read<BudgetsProvider>();
     final now = DateTime.now();
-    final yr  = budProv.currentYear  ?? now.year;
-    final mo  = budProv.currentMonth ?? now.month;
+    final yr = budProv.currentYear ?? now.year;
+    final mo = budProv.currentMonth ?? now.month;
 
-    // đảm bảo đã có dữ liệu tháng hiện tại trước khi mở trang
     await budProv.loadForMonth(year: yr, month: mo);
 
-    // map categoryId -> số đã phân bổ
     final initialAssigned = <int, num>{
       for (final it in budProv.items)
-        it.categoryId: (it.amount > 0 ? it.amount : (it as dynamic).amount ?? 0) as num
+        it.categoryId:
+            (it.amount > 0 ? it.amount : (it as dynamic).amount ?? 0) as num
     };
 
-    // mở trang, available không âm để tránh lỗi nhập
     final result = await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => AllocateMoneyPage(
@@ -206,7 +210,6 @@ class _BudgetsPageState extends State<BudgetsPage> {
 
     if (!mounted) return;
 
-    // Trang mới sẽ lưu từng mục và thường trả 'true'
     if (result == true) {
       await budProv.loadForMonth(year: yr, month: mo);
       await context.read<WalletProvider>().fetch();
@@ -214,7 +217,6 @@ class _BudgetsPageState extends State<BudgetsPage> {
       return;
     }
 
-    // Flow cũ: nếu trang trả về map phân bổ -> gọi assignMany
     if (result is Map) {
       final allocations = <int, double>{};
       result.forEach((k, v) {
@@ -268,13 +270,13 @@ class _BudgetsPageState extends State<BudgetsPage> {
     final totalAssigned =
         context.select<BudgetsProvider, num>((b) => b.totalAssigned);
 
-    // Cho phép âm nếu đã phân bổ > số dư
     final unassigned = totalBalance - totalAssigned;
-
     final authed = context.select<AuthProvider, bool>((a) => a.isAuthenticated);
 
+    final cs = Theme.of(context).colorScheme;
+
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: cs.background,
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(Icons.settings),
@@ -283,9 +285,11 @@ class _BudgetsPageState extends State<BudgetsPage> {
               MaterialPageRoute(builder: (_) => const MoneySettingsPage()),
             );
           },
+          color: cs.onPrimary,
         ),
         centerTitle: true,
-        backgroundColor: const Color(0xFF0F6C41),
+        backgroundColor: cs.primary,
+        foregroundColor: cs.onPrimary,
         title: _MonthPill(
           label: _formatMonthYear(context, _ym),
           onTap: () async {
@@ -314,11 +318,13 @@ class _BudgetsPageState extends State<BudgetsPage> {
             icon: const Icon(Icons.edit),
             tooltip: t.editCategories,
             onPressed: _openManageCategories,
+            color: cs.onPrimary,
           ),
         ],
       ),
       body: SafeArea(
         child: RefreshIndicator(
+          color: cs.primary,
           onRefresh: _reloadAll,
           child: ListView(
             physics: const AlwaysScrollableScrollPhysics(),
@@ -334,8 +340,9 @@ class _BudgetsPageState extends State<BudgetsPage> {
                         t,
                         totalAssigned,
                         unassigned,
-                        // nếu âm thì vẫn mở trang, nhưng available truyền 0
-                        onAssignPressed: () => _openAllocateMoney(unassigned > 0 ? unassigned : 0),
+                        onAssignPressed: () => _openAllocateMoney(
+                          unassigned > 0 ? unassigned : 0,
+                        ),
                       ),
                       const SizedBox(height: _vGap),
                       if (authed)
@@ -360,6 +367,7 @@ class _BudgetsPageState extends State<BudgetsPage> {
     num unassigned, {
     required VoidCallback onAssignPressed,
   }) {
+    final cs = Theme.of(context).colorScheme;
     final walletLoading =
         context.select<WalletProvider, bool>((w) => w.loading);
 
@@ -372,7 +380,7 @@ class _BudgetsPageState extends State<BudgetsPage> {
             width: double.infinity,
             decoration: BoxDecoration(
               gradient: LinearGradient(
-                colors: [Colors.green.shade700, Colors.green.shade400],
+                colors: [_darker(cs.primary), _lighter(cs.primary)],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
@@ -406,8 +414,8 @@ class _BudgetsPageState extends State<BudgetsPage> {
                       icon: const Icon(Icons.task_alt),
                       label: Text(t.assignMoneyCta),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.white,
-                        foregroundColor: Colors.green.shade800,
+                        backgroundColor: cs.onPrimary,
+                        foregroundColor: cs.primary,
                         padding: const EdgeInsets.symmetric(vertical: 14),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
@@ -431,11 +439,14 @@ class _BudgetsPageState extends State<BudgetsPage> {
                       width: 36,
                       height: 36,
                       decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(.9),
+                        color: cs.surface.withOpacity(.9),
                         shape: BoxShape.circle,
                       ),
                       padding: const EdgeInsets.all(6),
-                      child: const CircularProgressIndicator(strokeWidth: 2),
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: cs.primary,
+                      ),
                     ),
                   )
                 : const SizedBox.shrink(key: ValueKey('none')),
@@ -446,6 +457,7 @@ class _BudgetsPageState extends State<BudgetsPage> {
   }
 
   Widget _infoBox(BuildContext context, String label, num value) {
+    final cs = Theme.of(context).colorScheme;
     final isNegative = value < 0;
 
     return Column(
@@ -455,13 +467,13 @@ class _BudgetsPageState extends State<BudgetsPage> {
           label,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: const TextStyle(color: Colors.white, fontSize: 14),
+          style: TextStyle(color: cs.onPrimary, fontSize: 14),
         ),
         const SizedBox(height: 6),
         MoneyText(
           value,
           style: TextStyle(
-            color: isNegative ? Colors.redAccent.shade100 : Colors.white,
+            color: isNegative ? cs.errorContainer : cs.onPrimary,
             fontSize: 22,
             fontWeight: FontWeight.w700,
           ),
@@ -471,23 +483,24 @@ class _BudgetsPageState extends State<BudgetsPage> {
   }
 
   Widget _negativeBanner(BuildContext context, {required num debt}) {
+    final cs = Theme.of(context).colorScheme;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.95),
+        color: cs.errorContainer.withOpacity(.95),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.redAccent.withOpacity(.6)),
+        border: Border.all(color: cs.error),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          const Icon(Icons.error_outline, color: Colors.redAccent),
+          Icon(Icons.error_outline, color: cs.error),
           const SizedBox(width: 8),
           Expanded(
             child: RichText(
               text: TextSpan(
-                style: const TextStyle(color: Colors.black87, fontSize: 13.5),
+                style: TextStyle(color: cs.onErrorContainer, fontSize: 13.5),
                 children: [
                   const TextSpan(text: 'Đã phân bổ vượt số dư. Thiếu '),
                   WidgetSpan(
@@ -496,8 +509,8 @@ class _BudgetsPageState extends State<BudgetsPage> {
                       padding: const EdgeInsets.only(left: 2, right: 2),
                       child: MoneyText(
                         debt,
-                        style: const TextStyle(
-                          color: Colors.redAccent,
+                        style: TextStyle(
+                          color: cs.error,
                           fontWeight: FontWeight.w800,
                         ),
                       ),
@@ -514,9 +527,10 @@ class _BudgetsPageState extends State<BudgetsPage> {
   }
 
   Widget _askLoginCard(BuildContext context, AppLocalizations t) {
+    final cs = Theme.of(context).colorScheme;
     final theme = Theme.of(context);
     return Card(
-      color: Colors.amber.shade50,
+      color: cs.secondaryContainer.withOpacity(.3),
       elevation: 0.5,
       shape:
           RoundedRectangleBorder(borderRadius: BorderRadius.circular(_radius)),
@@ -544,6 +558,7 @@ class _BudgetsPageState extends State<BudgetsPage> {
 
   Widget _categorySection(BuildContext context, AppLocalizations t) {
     final theme = Theme.of(context);
+    final cs = theme.colorScheme;
     final cat = context.watch<CategoryProvider>();
 
     if (cat.loading) {
@@ -555,10 +570,10 @@ class _BudgetsPageState extends State<BudgetsPage> {
 
     if (cat.items.isEmpty) {
       return Card(
-        color: Colors.amber.shade50,
+        color: cs.secondaryContainer.withOpacity(.3),
         elevation: 0.5,
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(_radius)),
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(_radius)),
         child: Padding(
           padding: const EdgeInsets.all(20),
           child: Column(
@@ -582,7 +597,7 @@ class _BudgetsPageState extends State<BudgetsPage> {
                   onPressed: _openCreateCategory,
                   style: OutlinedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 14),
-                    side: BorderSide(color: Colors.grey.shade400),
+                    side: BorderSide(color: cs.outlineVariant),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
                     ),
@@ -638,7 +653,7 @@ class _BudgetsPageState extends State<BudgetsPage> {
         year: _ym.year,
         month: _ym.month,
         amount: 0,
-        spent: 0, // thêm mặc định spent
+        spent: 0,
       ),
     );
 
@@ -686,27 +701,29 @@ class _MonthPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
-          color: const Color(0xFF165F3D),
+          color: _darker(cs.primary, .1),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.white.withOpacity(.6)),
+          border: Border.all(color: cs.onPrimary.withOpacity(.6)),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
               label,
-              style: const TextStyle(
-                  color: Colors.white, fontWeight: FontWeight.w600),
+              style: TextStyle(
+                color: cs.onPrimary,
+                fontWeight: FontWeight.w600,
+              ),
             ),
             const SizedBox(width: 4),
-            const Icon(Icons.keyboard_arrow_down,
-                color: Colors.white, size: 18),
+            Icon(Icons.keyboard_arrow_down, color: cs.onPrimary, size: 18),
           ],
         ),
       ),
@@ -811,9 +828,12 @@ class _MonthPickerSheetState extends State<MonthPickerSheet> {
               return OutlinedButton(
                 onPressed: enabled ? () => Navigator.pop(context, dt) : null,
                 style: OutlinedButton.styleFrom(
-                  backgroundColor: isSelected ? Colors.green.shade50 : null,
+                  backgroundColor: isSelected ? Theme.of(context).colorScheme.primaryContainer : null,
                   side: BorderSide(
-                      color: isSelected ? Colors.green : Colors.black12),
+                    color: isSelected
+                        ? Theme.of(context).colorScheme.primary
+                        : Colors.black12,
+                  ),
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12)),
                 ),

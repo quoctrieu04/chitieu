@@ -6,7 +6,7 @@ import 'package:chitieu/api/wallet/wallet_provider.dart';
 class EditWalletForm extends StatefulWidget {
   final int walletId;
   final String initialName;
-  final double initialBalance;
+  final double initialBalance; // vẫn nhận để giữ nguyên số dư
 
   const EditWalletForm({
     super.key,
@@ -22,22 +22,17 @@ class EditWalletForm extends StatefulWidget {
 class _EditWalletFormState extends State<EditWalletForm> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _nameCtl;
-  late final TextEditingController _balanceCtl;
   bool _submitting = false;
 
   @override
   void initState() {
     super.initState();
     _nameCtl = TextEditingController(text: widget.initialName);
-    _balanceCtl = TextEditingController(
-      text: widget.initialBalance.toStringAsFixed(0),
-    );
   }
 
   @override
   void dispose() {
     _nameCtl.dispose();
-    _balanceCtl.dispose();
     super.dispose();
   }
 
@@ -45,17 +40,14 @@ class _EditWalletFormState extends State<EditWalletForm> {
     if (!_formKey.currentState!.validate()) return;
 
     final name = _nameCtl.text.trim();
-    final bal = double.tryParse(
-          _balanceCtl.text.replaceAll(',', '').replaceAll(' ', ''),
-        ) ??
-        0;
 
     setState(() => _submitting = true);
     try {
+      // Giữ nguyên số dư hiện tại, KHÔNG cho phép chỉnh ở UI
       final ok = await context.read<WalletProvider>().updateWallet(
             id: widget.walletId,
             name: name,
-            balance: bal,
+            balance: widget.initialBalance,
           );
       if (!mounted) return;
       if (ok) {
@@ -144,32 +136,23 @@ class _EditWalletFormState extends State<EditWalletForm> {
             ),
             const SizedBox(height: 12),
             const Text(
-              'Chỉnh sửa ví',
+              'Chỉnh sửa khoản thu',
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
             ),
             const SizedBox(height: 12),
+
+            // Chỉ còn tên
             TextFormField(
               controller: _nameCtl,
-              decoration: const InputDecoration(labelText: 'Tên ví'),
+              decoration: const InputDecoration(labelText: 'Tên khoản thu'),
               validator: (v) =>
-                  (v == null || v.trim().isEmpty) ? 'Nhập tên ví' : null,
-              textInputAction: TextInputAction.next,
+                  (v == null || v.trim().isEmpty) ? 'Nhập tên khoản thu' : null,
+              textInputAction: TextInputAction.done,
+              onFieldSubmitted: (_) => _submit(),
             ),
-            const SizedBox(height: 12),
-            TextFormField(
-              controller: _balanceCtl,
-              decoration: const InputDecoration(labelText: 'Số dư'),
-              keyboardType:
-                  const TextInputType.numberWithOptions(decimal: true),
-              validator: (v) {
-                final n = double.tryParse(
-                    (v ?? '').replaceAll(',', '').replaceAll(' ', ''));
-                if (n == null) return 'Số dư không hợp lệ';
-                if (n < 0) return 'Số dư phải >= 0';
-                return null;
-              },
-            ),
+
             const SizedBox(height: 16),
+
             // Nút lưu thay đổi
             SizedBox(
               width: double.infinity,
@@ -181,6 +164,7 @@ class _EditWalletFormState extends State<EditWalletForm> {
               ),
             ),
             const SizedBox(height: 12),
+
             // Nút xóa ví
             SizedBox(
               width: double.infinity,
