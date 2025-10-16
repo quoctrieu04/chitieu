@@ -19,7 +19,6 @@ import 'package:chitieu/api/wallet/wallet_provider.dart';
 
 // Tx
 import 'package:chitieu/api/tx/tx_provider.dart';
-import 'package:intl/intl.dart';
 
 // Budgets
 import 'package:chitieu/core/budget/budgets_provider.dart';
@@ -27,8 +26,9 @@ import 'package:chitieu/core/budget/budgets_provider.dart';
 // Categories (danh mục chi)
 import 'package:chitieu/api/category/category_provider.dart';
 import 'package:chitieu/api/category/category_model.dart';
-// (nếu muốn) sang trang chi tiết danh mục
-// import 'package:chitieu/core/budget/category/category_detail_page.dart';
+
+// NEW: trang hiển thị lịch sử theo filter
+import 'package:chitieu/pages/transactions_by_filter_page.dart';
 
 class AccountsPage extends StatefulWidget {
   const AccountsPage({super.key});
@@ -66,6 +66,7 @@ class _AccountsPageState extends State<AccountsPage> {
       if (_auth!.isAuthenticated && !_fetchedOnce) {
         _fetchedOnce = true;
         await context.read<WalletProvider>().fetch();
+        // vẫn giữ recent để nơi khác dùng; không hiển thị ở trang này nữa
         await context.read<TxProvider>().fetchRecent(limit: 5);
         await context.read<BudgetsProvider>().loadForMonth(
               year: DateTime.now().year,
@@ -107,9 +108,6 @@ class _AccountsPageState extends State<AccountsPage> {
     } else {
       _fetchedOnce = false;
       wallets.reset();
-      // context.read<BudgetsProvider>().reset();
-      // context.read<TxProvider>().clear();
-      // context.read<CategoryProvider>().reset();
     }
   }
 
@@ -134,7 +132,6 @@ class _AccountsPageState extends State<AccountsPage> {
     final moneySettings = context.watch<MoneySettingsProvider>().settings;
     String fmt(num v) => MoneyFormatter(moneySettings).format(v);
 
-    final txProv = context.watch<TxProvider>();
     final budgetsProv = context.watch<BudgetsProvider>();
     final catProv = context.watch<CategoryProvider>();
 
@@ -171,7 +168,6 @@ class _AccountsPageState extends State<AccountsPage> {
     return RefreshIndicator(
       onRefresh: () async {
         await context.read<WalletProvider>().fetch();
-        await context.read<TxProvider>().fetchRecent(limit: 5);
         await context.read<BudgetsProvider>().loadForMonth(
               year: DateTime.now().year,
               month: DateTime.now().month,
@@ -192,8 +188,7 @@ class _AccountsPageState extends State<AccountsPage> {
                 totalText: _hideBalance ? '•••' : fmt(totalBalance),
                 loading: walletProv.loading || budgetsProv.loading,
                 paymentText: _hideBalance ? '•••' : fmt(totalSpent),
-                trackingText:
-                    _hideBalance ? '•••' : fmt(combinedRemaining),
+                trackingText: _hideBalance ? '•••' : fmt(combinedRemaining),
                 onToggleEye: _toggleHide,
                 isHidden: _hideBalance,
               ),
@@ -382,6 +377,19 @@ class _AccountsPageState extends State<AccountsPage> {
                         );
                       }
                     },
+                    // NEW: chạm vào một nguồn thu để xem lịch sử theo ví
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => TransactionsByFilterPage(
+                            title: w.name,
+                            walletId: w.id.toString(),
+                            type:'thu'
+                          ),
+                        ),
+                      );
+                    },
                   );
                 }).toList(),
               ),
@@ -392,7 +400,7 @@ class _AccountsPageState extends State<AccountsPage> {
                   style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
               const SizedBox(height: 8),
 
-              // --- Danh mục thu (từ ví/khoản thu)
+              // --- Danh mục thu (dùng chính các ví như danh mục thu)
               _ExpandableHeader(
                 title: 'Danh mục thu',
                 expanded: _expandIncomeCats,
@@ -454,6 +462,19 @@ class _AccountsPageState extends State<AccountsPage> {
                                             }
                                           });
                                         },
+                                        // NEW: bấm danh mục thu (nguồn thu) → lọc theo ví
+                                        onTap: () {
+                                          Navigator.push(
+                                            context,
+                                            MaterialPageRoute(
+                                              builder: (_) =>
+                                                  TransactionsByFilterPage(
+                                                title: w.name,
+                                                walletId: w.id.toString(),
+                                              ),
+                                            ),
+                                          );
+                                        },
                                       );
                                     }).toList(),
                                   ),
@@ -496,15 +517,21 @@ class _AccountsPageState extends State<AccountsPage> {
                                         icon: Icons.label_rounded,
                                         color: const Color(0xFFD64545), // đỏ chi
                                         onEdit: () async {
-                                          // Nếu muốn, điều hướng sang trang chi tiết danh mục:
-                                          // await Navigator.push(context, MaterialPageRoute(
-                                          //   builder: (_) => CategoryDetailPage(
-                                          //     category: c,
-                                          //     year: DateTime.now().year,
-                                          //     month: DateTime.now().month,
-                                          //     initialLimit: 0,
-                                          //   ),
-                                          // ));
+                                          // (Có thể điều hướng sang trang edit chi tiết danh mục nếu cần)
+                                        },
+                                        // NEW: bấm danh mục chi → lọc theo category
+                                        onTap: () {
+                                          Navigator.push(
+                                            context,
+                                            MaterialPageRoute(
+                                              builder: (_) =>
+                                                  TransactionsByFilterPage(
+                                                title: c.name,
+                                                categoryId: c.id.toString(),
+                                                type:"chi"
+                                              ),
+                                            ),
+                                          );
                                         },
                                       );
                                     }).toList(),
@@ -513,86 +540,8 @@ class _AccountsPageState extends State<AccountsPage> {
                     : const SizedBox.shrink(),
               ),
 
+              // ===== ĐÃ BỎ: Lịch sử giao dịch tổng =====
               const SizedBox(height: 18),
-
-              // ===== Lịch sử giao dịch (recent) =====
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(t.transactionHistory,
-                      style: const TextStyle(
-                          fontSize: 22, fontWeight: FontWeight.w800)),
-                  TextButton(
-                    onPressed: () =>
-                        Navigator.pushNamed(context, '/transactions'),
-                    child: Text(
-                      t.viewAll,
-                      style: TextStyle(
-                        color: cs.primary,
-                        fontWeight: FontWeight.w700,
-                        decoration: TextDecoration.underline,
-                        decorationColor: cs.primary,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-
-              if (txProv.loadingRecent)
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 12),
-                  child: LinearProgressIndicator(minHeight: 2),
-                )
-              else if (txProv.recent.isEmpty)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  child: Text(t.noData,
-                      style: TextStyle(color: cs.onSurfaceVariant)),
-                )
-              else
-                Column(
-                  children: txProv.recent.map((tx) {
-                    final isOut = tx.type == 'chi';
-                    final sign = isOut ? '-' : '+';
-                    final color =
-                        isOut ? const Color(0xFFD64545) : const Color(0xFF1F9D4C);
-                    final dateStr =
-                        DateFormat('dd/MM, HH:mm').format(tx.occurredAt);
-
-                    return ListTile(
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 0),
-                      leading: CircleAvatar(
-                        backgroundColor: color.withOpacity(.15),
-                        child: Icon(
-                          isOut
-                              ? Icons.call_made_rounded
-                              : Icons.call_received_rounded,
-                          color: color,
-                        ),
-                      ),
-                      title: Text(
-                        tx.categoryName ??
-                            tx.walletName ??
-                            (isOut ? 'Chi' : 'Thu'),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontWeight: FontWeight.w700),
-                      ),
-                      subtitle: Text(
-                        (tx.note?.isNotEmpty == true) ? tx.note! : dateStr,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      trailing: Text(
-                        '$sign${MoneyFormatter(moneySettings).format(tx.amount)}',
-                        style:
-                            TextStyle(fontWeight: FontWeight.w800, color: color),
-                      ),
-                      onTap: () =>
-                          Navigator.pushNamed(context, '/transactions'),
-                    );
-                  }).toList(),
-                ),
             ],
           ),
         ),
@@ -943,6 +892,7 @@ class _WalletCard extends StatelessWidget {
   final bool isDefault;
   final IconData icon;
   final VoidCallback onEdit;
+  final VoidCallback? onTap; // NEW
 
   const _WalletCard({
     required this.name,
@@ -950,90 +900,97 @@ class _WalletCard extends StatelessWidget {
     required this.isDefault,
     required this.icon,
     required this.onEdit,
+    this.onTap, // NEW
   });
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
-        color: cs.surface,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: const [
-          BoxShadow(blurRadius: 6, offset: Offset(0, 2), color: Colors.black12)
-        ],
-      ),
-      child: Stack(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-            child: Row(
-              children: [
-                Container(
-                  decoration: BoxDecoration(
-                    color: cs.secondaryContainer,
-                    borderRadius: BorderRadius.circular(12),
+    return InkWell(
+      onTap: onTap, // NEW
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        decoration: BoxDecoration(
+          color: cs.surface,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: const [
+            BoxShadow(blurRadius: 6, offset: Offset(0, 2), color: Colors.black12)
+          ],
+        ),
+        child: Stack(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+              child: Row(
+                children: [
+                  Container(
+                    decoration: BoxDecoration(
+                      color: cs.secondaryContainer,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    width: 48,
+                    height: 48,
+                    child: Icon(icon, color: cs.onSecondaryContainer),
                   ),
-                  width: 48,
-                  height: 48,
-                  child: Icon(icon, color: cs.onSecondaryContainer),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              name,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                  fontSize: 16, fontWeight: FontWeight.w700),
-                            ),
-                          ),
-                          if (isDefault)
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 8, vertical: 4),
-                              decoration: BoxDecoration(
-                                color: cs.secondaryContainer,
-                                borderRadius: BorderRadius.circular(8),
-                              ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
                               child: Text(
-                                'Mặc định',
-                                style: TextStyle(
-                                  color: cs.onSecondaryContainer,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w700,
+                                name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                    fontSize: 16, fontWeight: FontWeight.w700),
+                              ),
+                            ),
+                            if (isDefault)
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: cs.secondaryContainer,
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Text(
+                                  'Mặc định',
+                                  style: TextStyle(
+                                    color: cs.onSecondaryContainer,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w700,
+                                  ),
                                 ),
                               ),
-                            ),
-                        ],
-                      ),
-                      const SizedBox(height: 6),
-                      Text(balanceText,
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          balanceText,
                           style: const TextStyle(
-                              fontSize: 16, fontWeight: FontWeight.w800)),
-                    ],
+                              fontSize: 16, fontWeight: FontWeight.w800),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-          Positioned(
-            right: 4,
-            top: 4,
-            child: IconButton(
-              onPressed: onEdit,
-              icon: const Icon(Icons.edit_outlined),
-              tooltip: 'Chỉnh sửa nguồn thu',
+            Positioned(
+              right: 4,
+              top: 4,
+              child: IconButton(
+                onPressed: onEdit,
+                icon: const Icon(Icons.edit_outlined),
+                tooltip: 'Chỉnh sửa nguồn thu',
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -1045,64 +1002,70 @@ class _CategoryCard extends StatelessWidget {
   final IconData icon;
   final Color color;
   final VoidCallback onEdit;
+  final VoidCallback? onTap; // NEW
 
   const _CategoryCard({
     required this.name,
     required this.icon,
     required this.color,
     required this.onEdit,
+    this.onTap, // NEW
   });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.06),
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: const [
-          BoxShadow(blurRadius: 6, offset: Offset(0, 2), color: Colors.black12)
-        ],
-        border: Border.all(color: color.withOpacity(.25)),
-      ),
-      child: Stack(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-            child: Row(
-              children: [
-                Container(
-                  decoration: BoxDecoration(
-                    color: color.withOpacity(0.18),
-                    borderRadius: BorderRadius.circular(12),
+    return InkWell(
+      onTap: onTap, // NEW
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.06),
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: const [
+            BoxShadow(blurRadius: 6, offset: Offset(0, 2), color: Colors.black12)
+          ],
+          border: Border.all(color: color.withOpacity(.25)),
+        ),
+        child: Stack(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+              child: Row(
+                children: [
+                  Container(
+                    decoration: BoxDecoration(
+                      color: color.withOpacity(0.18),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    width: 48,
+                    height: 48,
+                    child: Icon(icon, color: color),
                   ),
-                  width: 48,
-                  height: 48,
-                  child: Icon(icon, color: color),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                        fontSize: 16, fontWeight: FontWeight.w700),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          fontSize: 16, fontWeight: FontWeight.w700),
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-          Positioned(
-            right: 4,
-            top: 4,
-            child: IconButton(
-              onPressed: onEdit,
-              icon: const Icon(Icons.edit_outlined),
-              tooltip: 'Chỉnh sửa danh mục',
+            Positioned(
+              right: 4,
+              top: 4,
+              child: IconButton(
+                onPressed: onEdit,
+                icon: const Icon(Icons.edit_outlined),
+                tooltip: 'Chỉnh sửa danh mục',
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -1130,11 +1093,11 @@ class _ExpandableHeader extends StatelessWidget {
         padding: const EdgeInsets.symmetric(vertical: 6),
         child: Row(
           children: [
-            Icon(expanded ? Icons.expand_less : Icons.expand_more, color: cs.primary),
+            Icon(expanded ? Icons.expand_less : Icons.expand_more,
+                color: cs.primary),
             const SizedBox(width: 6),
             Text(title,
-                style:
-                    const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
           ],
         ),
       ),
